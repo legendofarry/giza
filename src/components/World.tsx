@@ -5,8 +5,9 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Atmosphere } from './Atmosphere';
 import Vehicle from './Vehicle';
-import newCityUrl from '../assets/models/newCity.glb?url';
 import { useGameStore, ItemType } from '../store/gameStore';
+// External model hosted by user on GitHub raw
+const newCityUrl = 'https://raw.githubusercontent.com/legendofarry/models/main/newCity.glb';
 import { inputState } from '../store';
 
 function createGrungeTexture(size = 512, pattern = 'noise') {
