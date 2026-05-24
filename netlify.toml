@@ -2,6 +2,10 @@
   command = "npm run build"
   publish = "dist"
 
+[build.environment]
+  # Increase Node heap during Netlify build to reduce OOM risk
+  NODE_OPTIONS = "--max-old-space-size=8192"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
