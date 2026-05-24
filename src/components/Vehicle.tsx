@@ -1,8 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
-// Load vehicle model at runtime from public to avoid bundling large binary
-const vehicleModelUrl = encodeURI('/assets/models/1999_mercedes_benz_s600.glb');
+import vehicleModelUrl from '../assets/models/1999_mercedes_benz_s600.glb?url';
 import * as THREE from 'three';
 import { RigidBody } from '@react-three/rapier';
 import type { RapierRigidBody } from '@react-three/rapier';

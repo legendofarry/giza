@@ -5,8 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Atmosphere } from './Atmosphere';
 import Vehicle from './Vehicle';
-// Load large map at runtime from public to avoid bundling binary into Vite build
-const newCityUrl = encodeURI('/assets/models/newCity.glb');
+import newCityUrl from '../assets/models/newCity.glb?url';
 import { useGameStore, ItemType } from '../store/gameStore';
 import { inputState } from '../store';
 
@@ -415,7 +414,5 @@ export function World() {
   );
 }
 
-// Preload the map async (runtime path)
-useGLTF.preload(newCityUrl);
-
+// Preload the map
 useGLTF.preload(newCityUrl);
