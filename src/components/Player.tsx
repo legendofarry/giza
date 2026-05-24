@@ -140,6 +140,14 @@ export function Player() {
   const speed = 5.0; // base speed
   const sprintMultiplier = 1.8;
   const rotationSensitivity = 2.0;
+  // Smoothed input + head/body refs for grounded camera
+  const smoothedLookRef = React.useRef({ x: 0, y: 0 });
+  const headYawRef = React.useRef(euler.current.y);
+  const headPitchRef = React.useRef(euler.current.x);
+  const bodyYawRef = React.useRef(euler.current.y);
+  const raycasterRef = React.useRef(new THREE.Raycaster());
+  const lastCollisionCheckRef = React.useRef(0);
+  const cachedCollisionRef = React.useRef<Vector3 | null>(null);
 
   useEffect(() => {
     // Add camera to pitch group to control vertical look
@@ -159,58 +167,129 @@ export function Player() {
 
     const isThirdPerson = gameStore.cameraMode === 'third-person';
 
-    // 1. Rotation (Look)
+    // 1) Smoothed look input to reduce touch jitter
+    const lookSmoothing = 12.0;
+    smoothedLookRef.current.x += (inputState.look.x - smoothedLookRef.current.x) * Math.min(1, lookSmoothing * delta);
+    smoothedLookRef.current.y += (inputState.look.y - smoothedLookRef.current.y) * Math.min(1, lookSmoothing * delta);
+
     const effectiveRotationSens = rotationSensitivity * gameStore.cameraSensitivity;
-    euler.current.y -= inputState.look.x * effectiveRotationSens * delta;
-    euler.current.x -= inputState.look.y * effectiveRotationSens * delta;
-    // Clamp pitch
-    const minPitch = isThirdPerson ? -0.9 : -Math.PI / 2 + 0.1;
-    const maxPitch = isThirdPerson ? 0.35 : Math.PI / 2 - 0.1;
-    euler.current.x = Math.max(minPitch, Math.min(maxPitch, euler.current.x));
 
-    pitchRef.current.quaternion.setFromEuler(new Euler(euler.current.x, euler.current.y, 0));
+    // Integrate to head yaw/pitch
+    headYawRef.current -= smoothedLookRef.current.x * effectiveRotationSens * delta;
+    headPitchRef.current -= smoothedLookRef.current.y * effectiveRotationSens * delta;
 
-    // 2. Movement
+    // Clamp pitch to realistic human limits
+    const maxUp = THREE.MathUtils.degToRad(70);
+    const maxDown = -THREE.MathUtils.degToRad(55);
+    headPitchRef.current = Math.max(maxDown, Math.min(maxUp, headPitchRef.current));
+
+    // Head yaw relative to body with limit
+    const maxHeadYaw = THREE.MathUtils.degToRad(60);
+    const normalize = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+    const relativeYaw = normalize(headYawRef.current - bodyYawRef.current);
+    const clampedRelative = Math.max(-maxHeadYaw, Math.min(maxHeadYaw, relativeYaw));
+    const headYawAbsolute = bodyYawRef.current + clampedRelative;
+
+    // Body follow / alignment
+    const bodyFollowSpeed = 3.0; // when exceeding head yaw limit
+    const bodyAlignSpeed = 0.6; // passive realignment
+    if (Math.abs(relativeYaw) > maxHeadYaw * 0.98) {
+      const bodyTarget = headYawRef.current - Math.sign(relativeYaw) * maxHeadYaw;
+      const yawDelta = normalize(bodyTarget - bodyYawRef.current);
+      bodyYawRef.current += yawDelta * Math.min(1, bodyFollowSpeed * delta);
+    } else {
+      const yawDelta = normalize(headYawAbsolute - bodyYawRef.current);
+      bodyYawRef.current += yawDelta * Math.min(1, bodyAlignSpeed * delta);
+    }
+
+    // Apply rotations
+    bodyRef.current.rotation.y = bodyYawRef.current;
+    pitchRef.current.quaternion.setFromEuler(new Euler(headPitchRef.current, headYawAbsolute, 0));
+
+    // 2) Movement with survival weighting
     const moveX = inputState.move.x;
     const moveZ = inputState.move.y;
 
-    const currentSpeed = speed * (inputState.sprint ? sprintMultiplier : 1.0);
+    const localMove = new Vector3(moveX, 0, moveZ);
+    const localLen = localMove.length();
+    direction.current.set(moveX, 0, moveZ);
+    if (localLen > 0.001) direction.current.normalize();
 
-    direction.current.set(moveX, 0, moveZ).normalize();
-    isMovingRef.current = direction.current.length() > 0.1;
+    isMovingRef.current = localLen > 0.1;
     isSprintingRef.current = inputState.sprint && isMovingRef.current;
 
+    // Speed modifiers: forward fastest, strafing slower, back slowest
+    const forwardDot = -direction.current.z; // joystick forward is negative y
+    let moveMultiplier = 1.0;
+    if (forwardDot > 0.7) moveMultiplier = 1.0;
+    else if (forwardDot < -0.7) moveMultiplier = 0.5;
+    else moveMultiplier = 0.72;
+
+    const currentSpeed = speed * moveMultiplier * (inputState.sprint ? sprintMultiplier : 1.0);
+
     if (direction.current.length() > 0) {
-      // Apply player rotation to movement direction
-      direction.current.applyEuler(new Euler(0, euler.current.y, 0));
-      
+      direction.current.applyEuler(new Euler(0, headYawAbsolute, 0));
       velocity.current.x = direction.current.x * currentSpeed;
       velocity.current.z = direction.current.z * currentSpeed;
     } else {
-      // Damping
       velocity.current.x *= 0.5;
       velocity.current.z *= 0.5;
     }
 
     // Apply movement physics
     const currentLinVel = rigidBodyRef.current.linvel();
-    rigidBodyRef.current.setLinvel(
-      { x: velocity.current.x, y: currentLinVel.y, z: velocity.current.z }, 
-      true
-    );
+    rigidBodyRef.current.setLinvel({ x: velocity.current.x, y: currentLinVel.y, z: velocity.current.z }, true);
 
-    // Sync non-physics playerRef to rigidBody output position so children update
+    // Sync position
     const translation = rigidBodyRef.current.translation();
     playerRef.current.position.copy(translation as Vector3);
-    if (bodyRef.current) {
-      bodyRef.current.rotation.y = euler.current.y;
+
+    // 3) Camera positioning + basic collision push-in for third-person
+    const desiredLocalCamera = isThirdPerson ? new Vector3(0, 0.22, 4.1) : new Vector3(0, 0, 0);
+    let finalLocalCamera = desiredLocalCamera.clone();
+
+    const now = state.clock.getElapsedTime();
+    const collisionInterval = 0.06;
+    if (isThirdPerson && now - lastCollisionCheckRef.current > collisionInterval) {
+      lastCollisionCheckRef.current = now;
+      // world positions
+      const headWorld = new Vector3();
+      pitchRef.current.getWorldPosition(headWorld);
+      const desiredCameraWorld = desiredLocalCamera.clone();
+      pitchRef.current.localToWorld(desiredCameraWorld);
+
+      const dir = desiredCameraWorld.clone().sub(headWorld);
+      const dist = dir.length();
+      if (dist > 0.001) {
+        dir.normalize();
+        raycasterRef.current.set(headWorld, dir);
+        raycasterRef.current.far = dist;
+        const intersects = raycasterRef.current.intersectObjects(state.scene.children, true);
+        const hit = intersects.find(i => {
+          let obj: Object3D | null = i.object;
+          while (obj) {
+            if (obj === playerRef.current) return false;
+            obj = obj.parent as Object3D | null;
+          }
+          return true;
+        });
+        if (hit) {
+          const safeWorld = hit.point.clone().add(dir.multiplyScalar(-0.15));
+          const safeLocal = safeWorld.clone();
+          pitchRef.current.worldToLocal(safeLocal);
+          cachedCollisionRef.current = safeLocal;
+        } else {
+          cachedCollisionRef.current = null;
+        }
+      } else {
+        cachedCollisionRef.current = null;
+      }
     }
 
-    const targetCameraPosition = isThirdPerson
-      ? new Vector3(0, 0.22, 4.1)
-      : new Vector3(0, 0, 0);
-    camera.position.lerp(targetCameraPosition, 1 - Math.exp(-10 * delta));
-    
+    if (cachedCollisionRef.current) finalLocalCamera.copy(cachedCollisionRef.current);
+
+    camera.position.lerp(finalLocalCamera, 1 - Math.exp(-10 * delta));
+
     // Dynamic FOV for sprinting
     const perspectiveCamera = camera as THREE.PerspectiveCamera;
     if (perspectiveCamera.fov !== undefined && gameStore.sprintShakeEnabled) {
@@ -224,17 +303,13 @@ export function Player() {
       perspectiveCamera.updateProjectionMatrix();
     }
 
-    // Flashlight logic
+    // Flashlight + fill light logic (unchanged)
     if (flashlightObjRef.current) {
         const targetIntensity = gameStore.flashlightOn && gameStore.flashlightBattery > 0 ? 120 : 0;
         flashlightObjRef.current.intensity += (targetIntensity - flashlightObjRef.current.intensity) * 15 * delta;
-        
-        // Flicker effect when low battery
         if (gameStore.flashlightOn && gameStore.flashlightBattery < 20 && gameStore.flashlightBattery > 0) {
             flashlightObjRef.current.intensity += (Math.random() - 0.5) * 30;
         }
-
-        // Slight weapon/flashlight sway
         const speedRatio = Math.sqrt(velocity.current.x**2 + velocity.current.z**2) / currentSpeed;
         const time = state.clock.getElapsedTime();
         if (speedRatio > 0.1) {
@@ -252,17 +327,15 @@ export function Player() {
         fillLightRef.current.intensity += (targetFill - fillLightRef.current.intensity) * 15 * delta;
     }
 
-    // Animate camera sway and bobbing
+    // Camera sway and bobbing (unchanged behavior)
     const speedRatio = Math.sqrt(velocity.current.x**2 + velocity.current.z**2) / currentSpeed;
     const time = state.clock.getElapsedTime();
     const restingEyeHeight = isThirdPerson ? 1.48 : 1.6;
     if (speedRatio > 0.1 && gameStore.headBobEnabled) {
        const bobPhase = time * (inputState.sprint ? 15 : 10);
        pitchRef.current.position.y = restingEyeHeight + Math.sin(bobPhase) * (isThirdPerson ? 0.025 : 0.05);
-       // Sway
        camera.rotation.z = isThirdPerson ? 0 : Math.sin(time * 5) * 0.02 * speedRatio;
     } else {
-       // Idle sway
        pitchRef.current.position.y += (restingEyeHeight - pitchRef.current.position.y) * 5 * delta;
        camera.rotation.z += (0 - camera.rotation.z) * 5 * delta;
        if (gameStore.headBobEnabled && !isThirdPerson) {
