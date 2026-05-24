@@ -148,6 +148,8 @@ export function Player() {
   const raycasterRef = React.useRef(new THREE.Raycaster());
   const lastCollisionCheckRef = React.useRef(0);
   const cachedCollisionRef = React.useRef<Vector3 | null>(null);
+  const collidablesRef = React.useRef<Object3D[]>([]);
+  const collidableBuildTimeRef = React.useRef<number>(0);
 
   useEffect(() => {
     // Add camera to pitch group to control vertical look
@@ -249,7 +251,7 @@ export function Player() {
     let finalLocalCamera = desiredLocalCamera.clone();
 
     const now = state.clock.getElapsedTime();
-    const collisionInterval = 0.06;
+    const collisionInterval = 0.12; // throttle raycasts for performance (approx 8Hz)
     if (isThirdPerson && now - lastCollisionCheckRef.current > collisionInterval) {
       lastCollisionCheckRef.current = now;
       // world positions
@@ -262,18 +264,29 @@ export function Player() {
       const dist = dir.length();
       if (dist > 0.001) {
         dir.normalize();
+        // Build collidable list periodically to avoid intersecting the entire scene every frame
+        if (collidablesRef.current.length === 0 || now - collidableBuildTimeRef.current > 5.0) {
+          collidablesRef.current = [];
+          state.scene.traverse((obj: Object3D) => {
+            // Only consider meshes that are visible and not part of the player hierarchy
+            if (!(obj as Mesh).isMesh) return;
+            if (!obj.visible) return;
+            let p: Object3D | null = obj;
+            while (p) {
+              if (p === playerRef.current) return;
+              p = p.parent as Object3D | null;
+            }
+            collidablesRef.current.push(obj);
+          });
+          collidableBuildTimeRef.current = now;
+        }
+
         raycasterRef.current.set(headWorld, dir);
         raycasterRef.current.far = dist;
-        const intersects = raycasterRef.current.intersectObjects(state.scene.children, true);
-        const hit = intersects.find(i => {
-          let obj: Object3D | null = i.object;
-          while (obj) {
-            if (obj === playerRef.current) return false;
-            obj = obj.parent as Object3D | null;
-          }
-          return true;
-        });
+        const intersects = raycasterRef.current.intersectObjects(collidablesRef.current, true);
+        const hit = intersects[0];
         if (hit) {
+          // move camera slightly forward from hit point
           const safeWorld = hit.point.clone().add(dir.multiplyScalar(-0.15));
           const safeLocal = safeWorld.clone();
           pitchRef.current.worldToLocal(safeLocal);
@@ -286,9 +299,55 @@ export function Player() {
       }
     }
 
+    // Motion layers: idle breathing, walk bob, lateral sway, and sprint shake
+    const time = now;
+    const speedRatio = currentSpeed > 0 ? Math.sqrt(velocity.current.x ** 2 + velocity.current.z ** 2) / currentSpeed : 0;
+    const restingEyeHeight = isThirdPerson ? 1.48 : 1.6;
+
+    // Idle breathing (subtle)
+    const idleFreq = 1.1; // slow breathing rate
+    const idleAmpY = isThirdPerson ? 0.006 : 0.01;
+    const idleAmpX = isThirdPerson ? 0.006 : 0.01;
+    const idleY = Math.sin(time * idleFreq) * idleAmpY * (1 - speedRatio);
+    const idleX = Math.sin(time * idleFreq * 0.6) * idleAmpX * (1 - speedRatio);
+
+    // Walking bob / sway
+    const bobPhase = time * (inputState.sprint ? 15 : 10);
+    const walkAmpY = isThirdPerson ? 0.02 : 0.04;
+    const walkAmpX = isThirdPerson ? 0.02 : 0.03;
+    const walkY = Math.sin(bobPhase) * walkAmpY * speedRatio;
+    const walkX = Math.cos(bobPhase * 0.5) * walkAmpX * speedRatio;
+
+    const totalYOffset = idleY + walkY;
+    const totalXOffset = idleX + walkX;
+
     if (cachedCollisionRef.current) finalLocalCamera.copy(cachedCollisionRef.current);
 
+    // Apply lateral/vertical offsets to third-person camera, or to head height in first-person
+    if (isThirdPerson) {
+      finalLocalCamera.x += totalXOffset;
+      finalLocalCamera.y += totalYOffset;
+      if (inputState.sprint && isSprintingRef.current) {
+        finalLocalCamera.z += Math.sin(time * 10) * 0.03; // subtle forward/back push
+      }
+    }
+
     camera.position.lerp(finalLocalCamera, 1 - Math.exp(-10 * delta));
+
+    // Smoothly blend head height for first-person and third-person pitch anchor
+    const desiredPitchY = restingEyeHeight + totalYOffset;
+    pitchRef.current.position.y += (desiredPitchY - pitchRef.current.position.y) * Math.min(1, 8 * delta);
+
+    // Roll / sway
+    const targetRoll = isThirdPerson ? 0 : Math.sin(bobPhase * 2) * 0.02 * speedRatio;
+    camera.rotation.z += (targetRoll - camera.rotation.z) * Math.min(1, 6 * delta);
+
+    // Sprint shake - subtle, layered frequencies for cinematic effect
+    if (inputState.sprint && isSprintingRef.current) {
+      const sprintShakeAmp = 0.004;
+      camera.rotation.x += Math.sin(time * 18) * sprintShakeAmp * 0.5;
+      camera.rotation.y += Math.sin(time * 12) * sprintShakeAmp * 0.25;
+    }
 
     // Dynamic FOV for sprinting
     const perspectiveCamera = camera as THREE.PerspectiveCamera;
@@ -305,21 +364,21 @@ export function Player() {
 
     // Flashlight + fill light logic (unchanged)
     if (flashlightObjRef.current) {
-        const targetIntensity = gameStore.flashlightOn && gameStore.flashlightBattery > 0 ? 120 : 0;
-        flashlightObjRef.current.intensity += (targetIntensity - flashlightObjRef.current.intensity) * 15 * delta;
-        if (gameStore.flashlightOn && gameStore.flashlightBattery < 20 && gameStore.flashlightBattery > 0) {
-            flashlightObjRef.current.intensity += (Math.random() - 0.5) * 30;
-        }
-        const speedRatio = Math.sqrt(velocity.current.x**2 + velocity.current.z**2) / currentSpeed;
-        const time = state.clock.getElapsedTime();
-        if (speedRatio > 0.1) {
-            const sway = Math.sin(time * 10) * 0.05 * speedRatio;
-            flashlightObjRef.current.position.x = 0.2 + sway;
-            flashlightObjRef.current.position.y = -0.2 - Math.abs(sway);
-        } else {
-            flashlightObjRef.current.position.x += (0.2 - flashlightObjRef.current.position.x) * 5 * delta;
-            flashlightObjRef.current.position.y += (-0.2 - flashlightObjRef.current.position.y) * 5 * delta;
-        }
+      const targetIntensity = gameStore.flashlightOn && gameStore.flashlightBattery > 0 ? 120 : 0;
+      flashlightObjRef.current.intensity += (targetIntensity - flashlightObjRef.current.intensity) * 15 * delta;
+      if (gameStore.flashlightOn && gameStore.flashlightBattery < 20 && gameStore.flashlightBattery > 0) {
+        flashlightObjRef.current.intensity += (Math.random() - 0.5) * 30;
+      }
+      const flashlightSpeedRatio = Math.sqrt(velocity.current.x**2 + velocity.current.z**2) / currentSpeed;
+      const flashlightTime = state.clock.getElapsedTime();
+      if (flashlightSpeedRatio > 0.1) {
+        const sway = Math.sin(flashlightTime * 10) * 0.05 * flashlightSpeedRatio;
+        flashlightObjRef.current.position.x = 0.2 + sway;
+        flashlightObjRef.current.position.y = -0.2 - Math.abs(sway);
+      } else {
+        flashlightObjRef.current.position.x += (0.2 - flashlightObjRef.current.position.x) * 5 * delta;
+        flashlightObjRef.current.position.y += (-0.2 - flashlightObjRef.current.position.y) * 5 * delta;
+      }
     }
 
     if (fillLightRef.current) {
@@ -327,21 +386,7 @@ export function Player() {
         fillLightRef.current.intensity += (targetFill - fillLightRef.current.intensity) * 15 * delta;
     }
 
-    // Camera sway and bobbing (unchanged behavior)
-    const speedRatio = Math.sqrt(velocity.current.x**2 + velocity.current.z**2) / currentSpeed;
-    const time = state.clock.getElapsedTime();
-    const restingEyeHeight = isThirdPerson ? 1.48 : 1.6;
-    if (speedRatio > 0.1 && gameStore.headBobEnabled) {
-       const bobPhase = time * (inputState.sprint ? 15 : 10);
-       pitchRef.current.position.y = restingEyeHeight + Math.sin(bobPhase) * (isThirdPerson ? 0.025 : 0.05);
-       camera.rotation.z = isThirdPerson ? 0 : Math.sin(time * 5) * 0.02 * speedRatio;
-    } else {
-       pitchRef.current.position.y += (restingEyeHeight - pitchRef.current.position.y) * 5 * delta;
-       camera.rotation.z += (0 - camera.rotation.z) * 5 * delta;
-       if (gameStore.headBobEnabled && !isThirdPerson) {
-           pitchRef.current.position.y += Math.sin(time * 2) * 0.005; // Ambient breathing
-       }
-    }
+    
   });
 
   return (
