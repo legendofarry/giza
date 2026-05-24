@@ -51,10 +51,20 @@ interface GameState {
   ambientVolume: number;
   uiVolume: number;
   hudScale: number;
+  // Vehicle state
+  inVehicle: boolean;
+  currentVehicleId?: string | null;
+  enteringVehicle?: string | null; // vehicle id being entered (animation in progress)
+  seatPosition?: { x: number; y: number; z: number } | null; // world-space seat anchor updated by active vehicle
   
   // Setters for Settings
   toggleCameraMode: () => void;
   setSetting: <K extends keyof GameState>(key: K, value: GameState[K]) => void;
+  // Vehicle actions
+  requestEnterVehicle: (vehicleId: string) => void;
+  enterVehicle: (vehicleId: string) => void;
+  exitVehicle: (spawn?: { x: number; y: number; z: number }) => void;
+  setSeatPosition: (pos: { x: number; y: number; z: number } | null) => void;
 }
 
 export const useGameStore = create<GameState>()(
@@ -123,6 +133,15 @@ export const useGameStore = create<GameState>()(
         cameraMode: state.cameraMode === 'first-person' ? 'third-person' : 'first-person'
       })),
       setSetting: (key, value) => set({ [key]: value }),
+      // Vehicle defaults
+      inVehicle: false,
+      currentVehicleId: null,
+      enteringVehicle: null,
+      seatPosition: null,
+      requestEnterVehicle: (vehicleId: string) => set({ enteringVehicle: vehicleId }),
+      enterVehicle: (vehicleId: string) => set({ inVehicle: true, currentVehicleId: vehicleId, enteringVehicle: null }),
+      exitVehicle: (spawn) => set((state) => ({ inVehicle: false, currentVehicleId: null, seatPosition: spawn ? { x: spawn.x, y: spawn.y, z: spawn.z } : null })),
+      setSeatPosition: (pos) => set({ seatPosition: pos }),
     }),
     {
       name: 'giza-survival-settings',

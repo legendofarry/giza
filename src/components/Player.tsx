@@ -13,6 +13,7 @@ import rastaPersonUrl from '../assets/models/Qaqk.fbx?url';
 import idleAnimationUrl from '../assets/models/Breathing Idle.fbx?url';
 import walkAnimationUrl from '../assets/models/Walking.fbx?url';
 import runAnimationUrl from '../assets/models/Fast Run.fbx?url';
+import enteringCarUrl from '../assets/models/Entering Car.fbx?url';
 
 const CHARACTER_CONFIG = {
   rastaGirl: {
@@ -60,31 +61,29 @@ function PlayerAvatar({
   const idleAnimation = useFBX(idleAnimationUrl);
   const walkAnimation = useFBX(walkAnimationUrl);
   const runAnimation = useFBX(runAnimationUrl);
+  const enterAnimation = useFBX(enteringCarUrl);
   const model = useMemo(() => SkeletonUtils.clone(sourceModel) as Group, [sourceModel]);
-
   const clips = useMemo(() => {
+    const arr: THREE.AnimationClip[] = [];
     const [idleClip] = idleAnimation.animations;
     const [walkClip] = walkAnimation.animations;
     const [runClip] = runAnimation.animations;
+    const [enterClip] = enterAnimation.animations;
+    if (idleClip) { const c = idleClip.clone(); c.name = 'idle'; arr.push(c); }
+    if (walkClip) { const c = walkClip.clone(); c.name = 'walk'; arr.push(c); }
+    if (runClip) { const c = runClip.clone(); c.name = 'run'; arr.push(c); }
+    if (enterClip) { const c = enterClip.clone(); c.name = 'enterVehicle'; arr.push(c); }
+    return arr;
+  }, [idleAnimation.animations, walkAnimation.animations, runAnimation.animations, enterAnimation.animations]);
 
-    return [
-      ...(idleClip ? [idleClip.clone()] : []),
-      ...(walkClip ? [walkClip.clone()] : []),
-      ...(runClip ? [runClip.clone()] : []),
-    ].map((clip, index) => {
-      clip.name = index === 0 ? 'idle' : index === 1 ? 'walk' : 'run';
-      return clip;
-    });
-  }, [idleAnimation.animations, walkAnimation.animations, runAnimation.animations]);
-
-  const { actions } = useAnimations(clips, rootRef);
+  const { actions: avatarActions, mixer } = useAnimations(clips, rootRef);
 
   useEffect(() => {
     configureCharacter(model);
   }, [model]);
 
   useEffect(() => {
-    const action = actions.idle;
+    const action = avatarActions.idle;
     if (!action) return;
 
     activeActionRef.current = 'idle';
@@ -92,7 +91,7 @@ function PlayerAvatar({
     return () => {
       action.fadeOut(0.18);
     };
-  }, [actions]);
+  }, [avatarActions]);
 
   useFrame(() => {
     const nextAction = isMovingRef.current
@@ -103,14 +102,40 @@ function PlayerAvatar({
 
     if (nextAction === activeActionRef.current) return;
 
-    const previousAction = actions[activeActionRef.current];
-    const action = actions[nextAction] || actions.idle;
+    const previousAction = avatarActions[activeActionRef.current];
+    const action = avatarActions[nextAction] || avatarActions.idle;
     if (!action) return;
-
     previousAction?.fadeOut(0.16);
     action.reset().fadeIn(0.16).play();
     activeActionRef.current = nextAction;
   });
+
+  // Play entering animation when requested via game store
+  const enteringVehicleId = useGameStore(state => state.enteringVehicle);
+  const requestEnter = useGameStore(state => state.requestEnterVehicle);
+  const confirmEnter = useGameStore(state => state.enterVehicle);
+  const enteringNowRef = React.useRef(false);
+
+  useEffect(() => {
+    if (!enteringVehicleId) return;
+    const enterAction = avatarActions && (avatarActions.enterVehicle || avatarActions['enterVehicle']);
+    if (!enterAction || enteringNowRef.current) return;
+    enteringNowRef.current = true;
+    // Play enter animation once
+    enterAction.reset();
+    enterAction.setLoop(THREE.LoopOnce, 1);
+    (enterAction as any).clampWhenFinished = true;
+    enterAction.fadeIn(0.12).play();
+
+    const duration = enterAction.getClip().duration || 1.0;
+    const t = setTimeout(() => {
+      // Confirm entering the vehicle in the global store
+      confirmEnter(enteringVehicleId);
+      enteringNowRef.current = false;
+    }, duration * 1000);
+
+    return () => clearTimeout(t);
+  }, [enteringVehicleId, avatarActions, confirmEnter]);
 
   return (
     <group ref={rootRef} scale={config.scale} rotation={[0, Math.PI, 0]}>
@@ -164,8 +189,34 @@ export function Player() {
     };
   }, [camera]);
 
+  // Detach camera when player is inside vehicle, and reattach on exit
+  const inVehicle = useGameStore(state => state.inVehicle);
+  const seatPosition = useGameStore(state => state.seatPosition);
+
+  useEffect(() => {
+    if (!pitchRef.current) return;
+    if (inVehicle) {
+      try { pitchRef.current.remove(camera); } catch (e) {}
+    } else {
+      try { pitchRef.current.add(camera); camera.position.set(0, 0, 0); } catch (e) {}
+    }
+  }, [inVehicle, camera]);
+
   useFrame((state, delta) => {
     if (!pitchRef.current || !rigidBodyRef.current || !playerRef.current) return;
+
+    // If player is inside a vehicle, keep the player's rigid body at seat and hide visuals
+    if (inVehicle) {
+      if (seatPosition && rigidBodyRef.current) {
+        try {
+          rigidBodyRef.current.setTranslation({ x: seatPosition.x, y: seatPosition.y - 1.0, z: seatPosition.z }, true);
+        } catch (e) {}
+      }
+      if (bodyRef.current) bodyRef.current.visible = false;
+      return;
+    } else {
+      if (bodyRef.current) bodyRef.current.visible = true;
+    }
 
     const isThirdPerson = gameStore.cameraMode === 'third-person';
 

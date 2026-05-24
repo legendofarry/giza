@@ -4,6 +4,8 @@ import { RigidBody } from '@react-three/rapier';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Atmosphere } from './Atmosphere';
+import Vehicle from './Vehicle';
+import newCityUrl from '../assets/models/newCity.glb?url';
 import { useGameStore, ItemType } from '../store/gameStore';
 import { inputState } from '../store';
 
@@ -239,7 +241,7 @@ function LootItem({ id, type, name, position, weight, onPickup }: { id: string, 
 }
 
 export function World() {
-  const { scene } = useGLTF('https://media.githubusercontent.com/media/legendofarry/models/main/postwar_city_-_exterior_scene.glb');
+  const { scene } = useGLTF(newCityUrl);
   const addItem = useGameStore(state => state.addItem);
 
   const [worldLoot, setWorldLoot] = useState([
@@ -352,6 +354,9 @@ export function World() {
       <RigidBody type="fixed" colliders="trimesh">
         <primitive object={scene} position={[0, 0, 0]} scale={[1, 1, 1]} castShadow receiveShadow />
       </RigidBody>
+
+      {/* Example vehicle instance (placed in the city) */}
+      <Vehicle id="car-1" position={[6, 0, 6]} />
       
       {/* Ground plane for physics stability and visual base */}
       <RigidBody type="fixed" name="floor" colliders="cuboid" position={[0, -0.5, 0]}>
@@ -409,4 +414,4 @@ export function World() {
   );
 }
 
-useGLTF.preload('https://media.githubusercontent.com/media/legendofarry/models/main/postwar_city_-_exterior_scene.glb');
+useGLTF.preload(newCityUrl);
