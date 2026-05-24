@@ -84,9 +84,10 @@ export default function App() {
     };
   }, []);
 
-  const handleStart = async () => {
+  // Reusable helper to request fullscreen and lock orientation.
+  const requestFullscreenAndLock = async () => {
     try {
-      if (document.documentElement.requestFullscreen) {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
         await document.documentElement.requestFullscreen();
       }
       if (screen.orientation && (screen.orientation as any).lock) {
@@ -95,6 +96,32 @@ export default function App() {
     } catch (e) {
       console.warn('Fullscreen/Orientation lock not supported or denied', e);
     }
+  };
+
+  // Try to enter fullscreen on the first user interaction (browsers require a user gesture).
+  useEffect(() => {
+    if (gameState === 'playing') return;
+
+    let handled = false;
+    const onFirstInteraction = async () => {
+      if (handled) return;
+      handled = true;
+      await requestFullscreenAndLock();
+    };
+
+    document.addEventListener('pointerdown', onFirstInteraction, { once: true, passive: true });
+    document.addEventListener('touchstart', onFirstInteraction, { once: true, passive: true });
+    document.addEventListener('keydown', onFirstInteraction, { once: true });
+
+    return () => {
+      document.removeEventListener('pointerdown', onFirstInteraction as EventListener);
+      document.removeEventListener('touchstart', onFirstInteraction as EventListener);
+      document.removeEventListener('keydown', onFirstInteraction as EventListener);
+    };
+  }, [gameState]);
+
+  const handleStart = async () => {
+    await requestFullscreenAndLock();
 
     const hasCompletedOnboarding = localStorage.getItem('giza_onboarding_complete') === 'true';
     if (hasCompletedOnboarding) {
