@@ -3,9 +3,10 @@ import { useFrame } from '@react-three/fiber';
 import { Center, ContactShadows, Environment, useAnimations, useFBX } from '@react-three/drei';
 import { Group, MathUtils, Mesh, MeshStandardMaterial, Object3D } from 'three';
 import { SkeletonUtils } from 'three-stdlib';
-import rastaGirlUrl from '../assets/models/Barbie.fbx?url';
-import rastaPersonUrl from '../assets/models/Qaqk.fbx?url';
-import idleAnimationUrl from '../assets/models/Breathing Idle.fbx?url';
+// Load FBX assets at runtime from public to avoid bundling them
+const rastaGirlUrl = encodeURI('/assets/models/Barbie.fbx');
+const rastaPersonUrl = encodeURI('/assets/models/Qaqk.fbx');
+const idleAnimationUrl = encodeURI('/assets/models/Breathing Idle.fbx');
 
 interface ArchetypeModelProps {
   archetype: string;

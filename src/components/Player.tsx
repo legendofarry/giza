@@ -8,12 +8,13 @@ import { RigidBody, CapsuleCollider } from '@react-three/rapier';
 import type { RapierRigidBody } from '@react-three/rapier';
 import { useGameStore } from '../store/gameStore';
 import { SkeletonUtils } from 'three-stdlib';
-import rastaGirlUrl from '../assets/models/Barbie.fbx?url';
-import rastaPersonUrl from '../assets/models/Qaqk.fbx?url';
-import idleAnimationUrl from '../assets/models/Breathing Idle.fbx?url';
-import walkAnimationUrl from '../assets/models/Walking.fbx?url';
-import runAnimationUrl from '../assets/models/Fast Run.fbx?url';
-import enteringCarUrl from '../assets/models/Entering Car.fbx?url';
+// Load character and animation FBX files from public at runtime to avoid bundling
+const rastaGirlUrl = encodeURI('/assets/models/Barbie.fbx');
+const rastaPersonUrl = encodeURI('/assets/models/Qaqk.fbx');
+const idleAnimationUrl = encodeURI('/assets/models/Breathing Idle.fbx');
+const walkAnimationUrl = encodeURI('/assets/models/Walking.fbx');
+const runAnimationUrl = encodeURI('/assets/models/Fast Run.fbx');
+const enteringCarUrl = encodeURI('/assets/models/Entering Car.fbx');
 
 const CHARACTER_CONFIG = {
   rastaGirl: {
