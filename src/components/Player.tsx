@@ -166,7 +166,7 @@ function PlayerAvatar({
       if (box && !box.isEmpty()) {
         const minY = box.min.y;
         // Move root so lowest vertex is at y=0 in local space, then apply small visual offset
-        rootRef.current.position.y = -minY * config.scale + VISUAL_FOOT_OFFSET;
+        rootRef.current.position.y = -0.58;
       }
     } catch (e) {
       // ignore

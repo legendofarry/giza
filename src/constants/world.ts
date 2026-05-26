@@ -1,3 +1,4 @@
+// src\constants\world.ts
 // World-wide scale constants (1 unit = 1 meter)
 export const UNIT = 1;
 
