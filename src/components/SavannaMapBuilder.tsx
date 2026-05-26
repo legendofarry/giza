@@ -70,7 +70,7 @@ export default function SavannaMapBuilder({ gridSize = 6, tileSize = TILE_SIZE, 
 
   // vehicle spawn near one edge
   const vehicleSpawn = useMemo(() => {
-    return { x: 0, y: 0.5, z: 0 };
+    return { x: 0, y: 0, z: 0 };
   }, []);
 
   return (

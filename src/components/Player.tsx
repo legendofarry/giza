@@ -158,20 +158,25 @@ function PlayerAvatar({
   }, [model]);
 
   // Align visual model so feet sit at y=0 (match capsule base)
-  useEffect(() => {
-    if (!model || !rootRef.current) return;
-    try {
-      model.updateMatrixWorld(true);
-      const box = new THREE.Box3().setFromObject(model);
-      if (box && !box.isEmpty()) {
-        const minY = box.min.y;
-        // Move root so lowest vertex is at y=0 in local space, then apply small visual offset
-        rootRef.current.position.y = -0.58;
-      }
-    } catch (e) {
-      // ignore
+  // Align visual model so feet sit exactly on ground
+useEffect(() => {
+  if (!model || !rootRef.current) return;
+
+  try {
+    model.updateMatrixWorld(true);
+
+    const box = new THREE.Box3().setFromObject(model);
+
+    if (!box.isEmpty()) {
+      const minY = box.min.y;
+
+      // Push model upward so lowest vertex touches y=0
+      rootRef.current.position.y = -minY - 0.02;
     }
-  }, [model, config.scale]);
+  } catch (e) {
+    console.warn('Avatar ground alignment failed', e);
+  }
+}, [model]);
 
   useEffect(() => {
     const keys = Object.keys(avatarActions || {});

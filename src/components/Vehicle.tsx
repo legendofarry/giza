@@ -3,8 +3,9 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import vehicleModelUrl from '../assets/models/a_land_explorer_free.glb?url';
 import * as THREE from 'three';
-import { RigidBody } from '@react-three/rapier';
+import { RigidBody, CuboidCollider } from '@react-three/rapier';
 import type { RapierRigidBody } from '@react-three/rapier';
+import { VISUAL_FOOT_OFFSET } from '../constants/world';
 import { useGameStore } from '../store/gameStore';
 import { inputState } from '../store';
 
@@ -14,7 +15,10 @@ export function Vehicle({ id = 'vehicle-1', position = [4, 0, 4] as [number, num
   const seatRef = useRef<THREE.Group>(null);
   const rigidRef = useRef<RapierRigidBody>(null);
   const speedRef = useRef(0);
-  const [modelScale, setModelScale] = useState(1);
+  const [modelScale, setModelScale] = useState<number>(1);
+  const [chassisYOffset, setChassisYOffset] = useState<number>(0);
+  const [colliderHalf, setColliderHalf] = useState<{ x: number; y: number; z: number }>({ x: 0.5, y: 0.25, z: 0.5 });
+  const [colliderReady, setColliderReady] = useState(false);
 
   const { camera } = useThree();
   const inVehicle = useGameStore(state => state.inVehicle);
@@ -52,6 +56,18 @@ export function Vehicle({ id = 'vehicle-1', position = [4, 0, 4] as [number, num
       let s = desiredLength / horizontal;
       s = Math.max(0.01, Math.min(10, s));
       setModelScale(s);
+
+      // Align the visual so the lowest vertex sits at y=0 (ground) in the RigidBody's local space
+      const chassisOffset = -box.min.y * s + VISUAL_FOOT_OFFSET;
+      setChassisYOffset(chassisOffset);
+
+      // Create a simple cuboid collider based on model footprint and a small height
+      const halfX = (size.x * s) / 2;
+      const halfZ = (size.z * s) / 2;
+      const colliderHeight = Math.max(0.35, size.y * s * 0.28);
+      const halfY = colliderHeight / 2;
+      setColliderHalf({ x: halfX, y: halfY, z: halfZ });
+      setColliderReady(true);
     } catch (e) {
       // fallback
       setModelScale(1);
@@ -61,9 +77,9 @@ export function Vehicle({ id = 'vehicle-1', position = [4, 0, 4] as [number, num
   useFrame((state, delta) => {
     if (!chassisRef.current || !rigidRef.current) return;
 
-    // world sync
+    // world sync: keep the visual chassis at the rigidbody position plus the visual offset
     const translation = rigidRef.current.translation();
-    chassisRef.current.position.set(translation.x, translation.y, translation.z);
+    chassisRef.current.position.set(translation.x, translation.y - rigidRef.current.translation().y + chassisYOffset, translation.z);
 
     // interaction distance (use camera/player head position)
     const camPos = camera.position;
@@ -153,10 +169,23 @@ export function Vehicle({ id = 'vehicle-1', position = [4, 0, 4] as [number, num
     };
   }, [inVehicle, currentVehicleId, camera, id]);
 
+  // Place RigidBody at ground-level (y=0) and offset visuals inside it. We'll use the provided X/Z.
+  const rbPosition: [number, number, number] = [position[0], 0, position[2]];
+
   return (
-    <group position={position}>
-      <RigidBody ref={rigidRef} type="dynamic" mass={1200} colliders={false} position={position}>
-        <group ref={chassisRef} dispose={null} castShadow receiveShadow scale={[modelScale, modelScale, modelScale]}>
+    <group position={[position[0], 0, position[2]]}>
+      <RigidBody ref={rigidRef} type="dynamic" mass={1200} colliders={false} position={rbPosition}>
+        {/* explicit collider so vehicle collides with ground and objects */}
+        {colliderReady && (
+          <CuboidCollider
+            args={[colliderHalf.x, colliderHalf.y, colliderHalf.z]}
+            position={[0, colliderHalf.y + 0.06, 0]}
+            restitution={0}
+            friction={0.8}
+          />
+        )}
+
+        <group ref={chassisRef} dispose={null} castShadow receiveShadow scale={[modelScale, modelScale, modelScale]} position={[0, chassisYOffset, 0]}>
           <primitive object={gltf.scene} />
         </group>
       </RigidBody>
