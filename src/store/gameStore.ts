@@ -51,6 +51,8 @@ interface GameState {
   ambientVolume: number;
   uiVolume: number;
   hudScale: number;
+  // Collision debug visualization
+  collisionDebug: boolean;
   // Vehicle state
   inVehicle: boolean;
   currentVehicleId?: string | null;
@@ -128,6 +130,7 @@ export const useGameStore = create<GameState>()(
       ambientVolume: 1.0,
       uiVolume: 1.0,
       hudScale: 1.0,
+      collisionDebug: false,
 
       toggleCameraMode: () => set((state) => ({
         cameraMode: state.cameraMode === 'first-person' ? 'third-person' : 'first-person'

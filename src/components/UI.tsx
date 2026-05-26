@@ -319,6 +319,16 @@ export function UI({ onMenuReturn }: UIProps) {
                           <div className={`w-4 h-4 rounded-full bg-black duration-300 transform ${gameStore.sprintShakeEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
                         </button>
                       </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono text-white/80 uppercase">Collision Debug</span>
+                        <button
+                          onClick={() => gameStore.setSetting('collisionDebug', !gameStore.collisionDebug)}
+                          className={`w-12 h-6 flex items-center p-1 rounded-full border duration-300 ${gameStore.collisionDebug ? 'bg-white border-white' : 'bg-[#141518] border-white/20'}`}
+                        >
+                          <div className={`w-4 h-4 rounded-full bg-black duration-300 transform ${gameStore.collisionDebug ? 'translate-x-6' : 'translate-x-0'}`} />
+                        </button>
+                      </div>
                     </div>
                   </section>
 

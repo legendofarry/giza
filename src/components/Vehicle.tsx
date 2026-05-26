@@ -1,7 +1,7 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
-import vehicleModelUrl from '../assets/models/1999_mercedes_benz_s600.glb?url';
+import vehicleModelUrl from '../assets/models/a_land_explorer_free.glb?url';
 import * as THREE from 'three';
 import { RigidBody } from '@react-three/rapier';
 import type { RapierRigidBody } from '@react-three/rapier';
@@ -14,6 +14,7 @@ export function Vehicle({ id = 'vehicle-1', position = [4, 0, 4] as [number, num
   const seatRef = useRef<THREE.Group>(null);
   const rigidRef = useRef<RapierRigidBody>(null);
   const speedRef = useRef(0);
+  const [modelScale, setModelScale] = useState(1);
 
   const { camera } = useThree();
   const inVehicle = useGameStore(state => state.inVehicle);
@@ -37,6 +38,25 @@ export function Vehicle({ id = 'vehicle-1', position = [4, 0, 4] as [number, num
       seatRef.current = seat;
     }
   }, []);
+
+  // Auto-scale vehicle model to a reasonable real-world size (meters)
+  useEffect(() => {
+    if (!gltf || !gltf.scene) return;
+    try {
+      const box = new THREE.Box3().setFromObject(gltf.scene);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      // Use horizontal footprint as primary metric
+      const horizontal = Math.max(size.x, size.z, 0.0001);
+      const desiredLength = 4.5; // target car length in meters
+      let s = desiredLength / horizontal;
+      s = Math.max(0.01, Math.min(10, s));
+      setModelScale(s);
+    } catch (e) {
+      // fallback
+      setModelScale(1);
+    }
+  }, [gltf]);
 
   useFrame((state, delta) => {
     if (!chassisRef.current || !rigidRef.current) return;
@@ -136,7 +156,7 @@ export function Vehicle({ id = 'vehicle-1', position = [4, 0, 4] as [number, num
   return (
     <group position={position}>
       <RigidBody ref={rigidRef} type="dynamic" mass={1200} colliders={false} position={position}>
-        <group ref={chassisRef} dispose={null} castShadow receiveShadow>
+        <group ref={chassisRef} dispose={null} castShadow receiveShadow scale={[modelScale, modelScale, modelScale]}>
           <primitive object={gltf.scene} />
         </group>
       </RigidBody>
