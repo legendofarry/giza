@@ -171,7 +171,7 @@ useEffect(() => {
       const minY = box.min.y;
 
       // Push model upward so lowest vertex touches y=0
-      rootRef.current.position.y = -minY - 0.02;
+      rootRef.current.position.y = -minY - 0.05;
     }
   } catch (e) {
     console.warn('Avatar ground alignment failed', e);
